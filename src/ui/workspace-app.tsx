@@ -307,6 +307,7 @@ function ToolPayloadView({
         path={card.path ?? card.label ?? "file"}
         resultId={card.resultId}
         text={text}
+        startLine={summaryNumber(card.summary, "offset") ?? 1}
         fileOptions={fileOptions}
       />
     );
@@ -319,21 +320,34 @@ function FilePayload({
   path,
   resultId,
   text,
+  startLine,
   fileOptions,
 }: {
   path: string;
   resultId: string;
   text: string;
+  startLine: number;
   fileOptions: React.ComponentProps<typeof File>["options"];
 }) {
+  const adjustedFileOptions = useMemo<React.ComponentProps<typeof File>["options"]>(
+    () => ({
+      ...fileOptions,
+      onPostRender: (node, instance, phase) => {
+        fileOptions?.onPostRender?.(node, instance, phase);
+        adjustFileLineNumbers(node, startLine);
+      },
+    }),
+    [fileOptions, startLine],
+  );
+
   return (
     <File
       file={{
         name: path,
         contents: text,
-        cacheKey: `${resultId}:${path}`,
+        cacheKey: `${resultId}:${path}:${startLine}`,
       }}
-      options={fileOptions}
+      options={adjustedFileOptions}
       className="pierre-file"
     />
   );
@@ -545,6 +559,33 @@ function payloadText(payload: ToolPayload | null): string {
       .filter(Boolean)
       .join("\n\n") ?? ""
   );
+}
+
+function summaryNumber(
+  summary: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  const value = summary?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function adjustFileLineNumbers(node: HTMLElement, startLine: number): void {
+  const offset = startLine - 1;
+  if (offset === 0) return;
+
+  const root = node.shadowRoot ?? node;
+  const gutters = root.querySelectorAll<HTMLElement>("[data-column-number][data-line-index]");
+
+  for (const gutter of gutters) {
+    const lineIndex = Number(gutter.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) continue;
+
+    const lineNumber = lineIndex + startLine;
+    gutter.dataset.columnNumber = String(lineNumber);
+    gutter
+      .querySelector<HTMLElement>("[data-line-number-content]")
+      ?.replaceChildren(String(lineNumber));
+  }
 }
 
 function EmptyState({
