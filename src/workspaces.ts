@@ -6,6 +6,7 @@ import { loadProjectContextFiles } from "@earendil-works/pi-coding-agent";
 import type { ServerConfig } from "./config.js";
 import { createManagedWorktree } from "./git-worktrees.js";
 import { assertAllowedPath, isPathInsideRoot, resolveAllowedPath } from "./roots.js";
+import { BoundedMap } from "./bounded-map.js";
 import {
   loadWorkspaceSkills,
   markSkillActivated,
@@ -62,7 +63,7 @@ export interface OpenWorkspaceInput {
 }
 
 export class WorkspaceRegistry {
-  private readonly workspaces = new Map<string, Workspace>();
+  private readonly workspaces = new BoundedMap<string, Workspace>(100);
 
   constructor(
     private readonly config: ServerConfig,
@@ -193,6 +194,25 @@ export class WorkspaceRegistry {
     sourceRoot?: string;
     worktree?: WorkspaceWorktree;
   }): Promise<WorkspaceContext> {
+    // Reuse an existing recent session for the same (root, mode) instead of
+    // minting a new workspaceId. AGENTS.md instructs the model to call
+    // open_workspace once per folder; this enforces it server-side so a
+    // misbehaving client can't keep allocating new sessions.
+    const dedupWindowMs = 60 * 60 * 1000;
+    const recentSession = this.store?.findRecentByRootAndMode(
+      input.root,
+      input.mode,
+      new Date(Date.now() - dedupWindowMs).toISOString(),
+    );
+    if (recentSession) {
+      const restored = this.getWorkspace(recentSession.id);
+      return {
+        workspace: restored,
+        agentsFiles: this.loadInitialAgentsFiles(restored.root),
+        availableAgentsFiles: [],
+      };
+    }
+
     const workspace: Workspace = {
       id: `ws_${randomUUID()}`,
       root: input.root,

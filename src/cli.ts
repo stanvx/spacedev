@@ -5,7 +5,8 @@ import { resolve } from "node:path";
 import * as prompts from "@clack/prompts";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 import { satisfies } from "semver";
-import { loadConfig } from "./config.js";
+import { assertSafeHostConfiguration, loadConfig } from "./config.js";
+import { logEvent } from "./logger.js";
 import {
   generateOwnerToken,
   loadDevspaceFiles,
@@ -178,6 +179,12 @@ async function serve(): Promise<void> {
 
   const { createServer } = await import("./server.js");
   const config = loadConfig();
+  assertSafeHostConfiguration(config, process.env);
+  process.on("unhandledRejection", (reason) => {
+    logEvent(config.logging, "error", "unhandled_rejection", {
+      reason: reason instanceof Error ? reason.message : String(reason),
+    });
+  });
   const { app, close } = createServer(config);
   const httpServer = app.listen(config.port, config.host, () => {
     console.log(`devspace listening on http://${config.host}:${config.port}/mcp`);

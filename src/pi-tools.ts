@@ -18,7 +18,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { resolveAllowedPath } from "./roots.js";
 
-type McpContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+type McpContent = { type: "text"; text: string };
 export type ToolResponse<TDetails = unknown> = {
   content: McpContent[];
   details?: TDetails;
@@ -32,17 +32,10 @@ interface ToolContext {
 }
 
 function toMcpContent(result: AgentToolResult<unknown>): McpContent[] {
-  return result.content.map((content) => {
-    if (content.type === "text") {
-      return { type: "text", text: content.text };
-    }
-
-    return {
-      type: "image",
-      data: content.data,
-      mimeType: content.mimeType,
-    };
-  });
+  // Pi's tool surface returns text content only. Any non-text content shape
+  // would be a contract change in the SDK; coerce to text so the server
+  // keeps emitting well-formed MCP responses.
+  return result.content.map((content) => ({ type: "text", text: String((content as { text?: unknown }).text ?? "") }));
 }
 
 function formatToolError(error: unknown): McpContent[] {

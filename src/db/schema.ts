@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const workspaceSessions = sqliteTable(
   "workspace_sessions",
@@ -17,24 +17,6 @@ export const workspaceSessions = sqliteTable(
   (table) => [
     index("workspace_sessions_root_idx").on(table.root, table.lastUsedAt),
     index("workspace_sessions_status_idx").on(table.status, table.lastUsedAt),
-  ],
-);
-
-export const loadedAgentFiles = sqliteTable(
-  "loaded_agent_files",
-  {
-    workspaceSessionId: text("workspace_session_id")
-      .notNull()
-      .references(() => workspaceSessions.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
-    contentHash: text("content_hash").notNull(),
-    content: text("content").notNull(),
-    loadedAt: text("loaded_at").notNull(),
-    lastSeenAt: text("last_seen_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.workspaceSessionId, table.path] }),
-    index("loaded_agent_files_path_idx").on(table.path),
   ],
 );
 
@@ -75,5 +57,3 @@ export const oauthRefreshTokens = sqliteTable(
 
 export type WorkspaceSessionRow = typeof workspaceSessions.$inferSelect;
 export type NewWorkspaceSessionRow = typeof workspaceSessions.$inferInsert;
-export type LoadedAgentFileRow = typeof loadedAgentFiles.$inferSelect;
-export type NewLoadedAgentFileRow = typeof loadedAgentFiles.$inferInsert;

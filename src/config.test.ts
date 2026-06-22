@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "./config.js";
+import { assertSafeHostConfiguration, loadConfig } from "./config.js";
 
 const emptyConfigDir = mkdtempSync(join(tmpdir(), "devspace-empty-config-test-"));
 const baseEnv = {
@@ -51,9 +51,9 @@ assert.throws(
 assert.deepEqual(loadConfig(baseEnv).logging, {
   level: "info",
   format: "json",
-  requests: true,
+  requests: false,
   assets: false,
-  toolCalls: true,
+  toolCalls: false,
   shellCommands: false,
   trustProxy: false,
 });
@@ -67,8 +67,13 @@ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_LEVEL: "debug" }).logging.lev
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_FORMAT: "json" }).logging.format, "json");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_FORMAT: "pretty" }).logging.format, "pretty");
 
+// requests and toolCalls default to off to avoid flooding logs on large reads.
+assert.equal(loadConfig({ ...baseEnv }).logging.requests, false);
+assert.equal(loadConfig({ ...baseEnv }).logging.toolCalls, false);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_REQUESTS: "1" }).logging.requests, true);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_REQUESTS: "0" }).logging.requests, false);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_ASSETS: "1" }).logging.assets, true);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_TOOL_CALLS: "1" }).logging.toolCalls, true);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_TOOL_CALLS: "0" }).logging.toolCalls, false);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_SHELL_COMMANDS: "1" }).logging.shellCommands, true);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TRUST_PROXY: "1" }).logging.trustProxy, true);
@@ -140,6 +145,29 @@ assert.deepEqual(
 assert.deepEqual(
   loadConfig({ ...baseEnv, DEVSPACE_ALLOWED_HOSTS: "*" }).allowedHosts,
   ["*"],
+);
+
+assert.throws(
+  () =>
+    assertSafeHostConfiguration(
+      loadConfig({ ...baseEnv, DEVSPACE_ALLOWED_HOSTS: "*", DEVSPACE_TRUST_PROXY: "1" }),
+    ),
+  /trustProxy|wildcard/i,
+);
+
+const allowedWildcardConfig = loadConfig({
+  ...baseEnv,
+  DEVSPACE_ALLOWED_HOSTS: "*",
+  DEVSPACE_TRUST_PROXY: "1",
+  DEVSPACE_ALLOW_WILDCARD_HOSTS: "1",
+});
+assertSafeHostConfiguration(allowedWildcardConfig, {
+  DEVSPACE_ALLOW_WILDCARD_HOSTS: "1",
+});
+
+assertSafeHostConfiguration(
+  loadConfig({ ...baseEnv, DEVSPACE_ALLOWED_HOSTS: "*", DEVSPACE_TRUST_PROXY: "0" }),
+  {},
 );
 
 const configDir = mkdtempSync(join(tmpdir(), "devspace-config-test-"));

@@ -75,6 +75,28 @@ function normalizeAllowedHosts(rawHosts: string[], derivedHosts: string[]): stri
   return Array.from(new Set(hosts.map((host) => host.trim()).filter(Boolean)));
 }
 
+/**
+ * Reject the dangerous combination of "trust the X-Forwarded-Host header" plus
+ * "accept any host". Express would happily route OAuth callbacks and resource
+ * URLs derived from a poisoned Host header to an attacker-controlled origin.
+ * Callers can opt out by setting DEVSPACE_ALLOW_WILDCARD_HOSTS=1 explicitly.
+ */
+export function assertSafeHostConfiguration(
+  config: ServerConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (!config.logging.trustProxy) return;
+  if (!config.allowedHosts.includes("*")) return;
+  if (parseBoolean(env.DEVSPACE_ALLOW_WILDCARD_HOSTS)) return;
+
+  throw new Error(
+    "Refusing to start: DEVSPACE_TRUST_PROXY is enabled but allowedHosts contains '*'. " +
+      "This combination lets an attacker forge the Host header. " +
+      "Either restrict DEVSPACE_ALLOWED_HOSTS to a concrete origin, " +
+      "or set DEVSPACE_ALLOW_WILDCARD_HOSTS=1 to acknowledge the risk.",
+  );
+}
+
 function parseBoolean(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value?.toLowerCase() ?? "");
 }
@@ -144,9 +166,9 @@ function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
   return {
     level: parseLogLevel(env.DEVSPACE_LOG_LEVEL),
     format: parseLogFormat(env.DEVSPACE_LOG_FORMAT),
-    requests: env.DEVSPACE_LOG_REQUESTS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_REQUESTS),
+    requests: env.DEVSPACE_LOG_REQUESTS === undefined ? false : parseBoolean(env.DEVSPACE_LOG_REQUESTS),
     assets: parseBoolean(env.DEVSPACE_LOG_ASSETS),
-    toolCalls: env.DEVSPACE_LOG_TOOL_CALLS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_TOOL_CALLS),
+    toolCalls: env.DEVSPACE_LOG_TOOL_CALLS === undefined ? false : parseBoolean(env.DEVSPACE_LOG_TOOL_CALLS),
     shellCommands: parseBoolean(env.DEVSPACE_LOG_SHELL_COMMANDS),
     trustProxy: parseBoolean(env.DEVSPACE_TRUST_PROXY),
   };
@@ -171,6 +193,10 @@ function parseRequiredSecret(value: string | undefined, name: string): string {
 }
 
 function parseOAuthConfig(env: NodeJS.ProcessEnv, ownerToken: string | undefined): OAuthConfig {
+  const scopes = parseStringList(env.DEVSPACE_OAUTH_SCOPES, ["devspace"]);
+  if (scopes.length === 0) {
+    throw new Error("DEVSPACE_OAUTH_SCOPES must contain at least one scope.");
+  }
   return {
     ownerToken: parseRequiredSecret(env.DEVSPACE_OAUTH_OWNER_TOKEN ?? ownerToken, "DEVSPACE_OAUTH_OWNER_TOKEN"),
     accessTokenTtlSeconds: parsePositiveInteger(
@@ -183,7 +209,7 @@ function parseOAuthConfig(env: NodeJS.ProcessEnv, ownerToken: string | undefined
       DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS,
       "DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS",
     ),
-    scopes: parseStringList(env.DEVSPACE_OAUTH_SCOPES, ["devspace"]),
+    scopes,
     allowedRedirectHosts: parseStringList(env.DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS, [
       "chatgpt.com",
       "localhost",

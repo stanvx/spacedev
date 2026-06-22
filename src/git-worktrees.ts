@@ -1,12 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import type { ServerConfig } from "./config.js";
 import { assertAllowedPath, isPathInsideRoot } from "./roots.js";
-
-const execFileAsync = promisify(execFile);
+import { git as runGit } from "./git.js";
 
 export class GitWorktreeError extends Error {
   constructor(
@@ -59,7 +56,7 @@ export async function createManagedWorktree(input: {
   const sourceRoot = await resolveGitRoot(sourcePath, input.config.allowedRoots);
   const baseRef = input.baseRef ?? "HEAD";
   const baseSha = await resolveBaseCommit(sourceRoot, baseRef);
-  const dirtySource = (await git(["status", "--porcelain=v1"], sourceRoot)).trim().length > 0;
+  const dirtySource = (await runGit(sourceRoot, ["status", "--porcelain=v1"])).stdout.trim().length > 0;
   const worktreePath = managedWorktreePath({
     worktreeRoot: input.config.worktreeRoot,
     repoRoot: sourceRoot,
@@ -69,7 +66,7 @@ export async function createManagedWorktree(input: {
   assertAllowedPath(worktreePath, [input.config.worktreeRoot]);
 
   try {
-    await git(["worktree", "add", "--detach", worktreePath, baseSha], sourceRoot);
+    await runGit(sourceRoot, ["worktree", "add", "--detach", worktreePath, baseSha]);
   } catch (error) {
     await rm(worktreePath, { recursive: true, force: true });
     const message = error instanceof Error ? error.message : String(error);
@@ -92,10 +89,11 @@ export async function createManagedWorktree(input: {
 
 async function resolveGitRoot(path: string, allowedRoots: string[]): Promise<string> {
   try {
-    const output = await git(["rev-parse", "--show-toplevel"], path);
-    return await assertGitRootAllowed(output.trim(), allowedRoots);
+    const output = await runGit(path, ["rev-parse", "--show-toplevel"]);
+    return await assertGitRootAllowed(output.stdout.trim(), allowedRoots);
   } catch (error) {
-    if (isGitUnavailable(error)) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/ENOENT|no such file/i.test(message)) {
       throw new GitWorktreeError(
         "GIT_NOT_AVAILABLE",
         "Cannot open workspace in worktree mode because Git is not available on this machine.",
@@ -130,7 +128,7 @@ async function assertGitRootAllowed(gitRoot: string, allowedRoots: string[]): Pr
 
 async function resolveBaseCommit(sourceRoot: string, baseRef: string): Promise<string> {
   try {
-    return (await git(["rev-parse", "--verify", `${baseRef}^{commit}`], sourceRoot)).trim();
+    return (await runGit(sourceRoot, ["rev-parse", "--verify", `${baseRef}^{commit}`])).stdout.trim();
   } catch (error) {
     if (baseRef === "HEAD") {
       throw new GitWorktreeError(
@@ -157,34 +155,4 @@ function sanitizePathSegment(value: string): string {
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
-}
-
-async function git(args: string[], cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    return stdout;
-  } catch (error) {
-    if (isGitUnavailable(error)) throw error;
-
-    const stderr = typeof error === "object" && error && "stderr" in error
-      ? String((error as { stderr?: unknown }).stderr ?? "").trim()
-      : "";
-    const stdout = typeof error === "object" && error && "stdout" in error
-      ? String((error as { stdout?: unknown }).stdout ?? "").trim()
-      : "";
-    const details = stderr || stdout || (error instanceof Error ? error.message : String(error));
-    throw new Error(details);
-  }
-}
-
-function isGitUnavailable(error: unknown): boolean {
-  return Boolean(
-    typeof error === "object" &&
-      error &&
-      "code" in error &&
-      (error as { code?: unknown }).code === "ENOENT",
-  );
 }

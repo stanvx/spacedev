@@ -17,6 +17,11 @@ const migrations: Migration[] = [
     name: "oauth-state",
     up: migrateOAuthState,
   },
+  {
+    version: 3,
+    name: "drop-loaded-agent-files",
+    up: dropLoadedAgentFiles,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -70,22 +75,6 @@ function migrateWorkspaceState(sqlite: Database.Database): void {
 
     create index if not exists workspace_sessions_status_idx
       on workspace_sessions(status, last_used_at desc);
-
-    create table if not exists loaded_agent_files (
-      workspace_session_id text not null,
-      path text not null,
-      content_hash text not null,
-      content text not null,
-      loaded_at text not null,
-      last_seen_at text not null,
-      primary key (workspace_session_id, path),
-      foreign key (workspace_session_id)
-        references workspace_sessions(id)
-        on delete cascade
-    );
-
-    create index if not exists loaded_agent_files_path_idx
-      on loaded_agent_files(path);
   `);
 
   addColumnIfMissing(sqlite, "workspace_sessions", "mode", "text not null default 'checkout'");
@@ -93,6 +82,10 @@ function migrateWorkspaceState(sqlite: Database.Database): void {
   addColumnIfMissing(sqlite, "workspace_sessions", "base_ref", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "base_sha", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "managed", "text not null default 'false'");
+}
+
+function dropLoadedAgentFiles(sqlite: Database.Database): void {
+  sqlite.exec(`drop table if exists loaded_agent_files;`);
 }
 
 function migrateOAuthState(sqlite: Database.Database): void {

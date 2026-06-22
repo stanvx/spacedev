@@ -22,12 +22,54 @@ export interface SkillReadResolution {
 export function loadWorkspaceSkills(config: ServerConfig, cwd: string): LoadedSkills {
   if (!config.skillsEnabled) return { skills: [], diagnostics: [] };
 
-  return loadSkills({
+  const loaded = loadSkills({
     cwd,
     agentDir: config.agentDir,
     skillPaths: config.skillPaths,
     includeDefaults: true,
   });
+
+  return filterSkillsToAllowedRoots(loaded, config);
+}
+
+/**
+ * Filter out any skill whose baseDir or filePath falls outside the configured
+ * allowedRoots or the explicitly configured skillPaths. A skill declaring a
+ * baseDir outside the allowlist would otherwise become a path-traversal pivot
+ * through the read tool.
+ */
+function filterSkillsToAllowedRoots(
+  loaded: LoadSkillsResult,
+  config: ServerConfig,
+): LoadedSkills {
+  // A skill is acceptable if its baseDir AND filePath each fall inside at
+  // least one of: the workspace allowlist, the configured skill paths, or the
+  // agent directory. Without this guard a skill declaring an out-of-tree
+  // baseDir becomes a path-traversal pivot for the read tool.
+  const acceptedDirs = [...config.allowedRoots, ...config.skillPaths, config.agentDir];
+  const insideAny = (path: string) => acceptedDirs.some((root) => isPathInsideRoot(path, root));
+
+  const kept: Skill[] = [];
+  const droppedNames: string[] = [];
+
+  for (const skill of loaded.skills) {
+    if (insideAny(skill.baseDir) && insideAny(skill.filePath)) {
+      kept.push(skill);
+    } else {
+      droppedNames.push(skill.name);
+    }
+  }
+
+  const diagnostics = [...loaded.diagnostics];
+  if (droppedNames.length > 0) {
+    diagnostics.push({
+      type: "skill_path_outside_root",
+      skills: droppedNames,
+      message: `Dropped ${droppedNames.length} skill(s) whose baseDir/filePath is outside allowedRoots or skillPaths: ${droppedNames.join(", ")}`,
+    } as unknown as LoadSkillsResult["diagnostics"][number]);
+  }
+
+  return { skills: kept, diagnostics };
 }
 
 export function resolveSkillReadPath(

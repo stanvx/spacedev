@@ -11,6 +11,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { checkResourceAllowed, resourceUrlFromServerUrl } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import { SqliteOAuthClientsStore, SqliteOAuthStore } from "./oauth-store.js";
+import { BoundedMap } from "./bounded-map.js";
 
 export interface OAuthConfig {
   ownerToken: string;
@@ -113,9 +114,10 @@ function requestedScopesAllowed(requested: string[], supported: string[]): boole
 
 export class SingleUserOAuthProvider implements OAuthServerProvider {
   readonly clientsStore: OAuthRegisteredClientsStore;
-  private readonly codes = new Map<string, AuthorizationCodeRecord>();
+  private readonly codes = new BoundedMap<string, AuthorizationCodeRecord>(1000);
   private readonly oauthStore: SqliteOAuthStore;
   private readonly resourceServerUrl: URL;
+  private readonly sweepTimer: NodeJS.Timeout;
 
   constructor(
     private readonly config: OAuthConfig,
@@ -125,6 +127,17 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
     this.resourceServerUrl = resourceUrlFromServerUrl(resourceServerUrl);
     this.oauthStore = new SqliteOAuthStore(stateDir);
     this.clientsStore = new SqliteOAuthClientsStore(this.oauthStore, config.allowedRedirectHosts);
+    // Periodically drop expired authorization codes so they don't accumulate
+    // in the bounded Map between requests.
+    this.sweepTimer = setInterval(() => this.sweepExpiredCodes(), 60_000);
+    this.sweepTimer.unref?.();
+  }
+
+  private sweepExpiredCodes(): void {
+    const now = Date.now();
+    for (const [code, record] of this.codes) {
+      if (record.expiresAtMs < now) this.codes.delete(code);
+    }
   }
 
   async authorize(

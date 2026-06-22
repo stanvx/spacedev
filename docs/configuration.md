@@ -104,9 +104,9 @@ npx @waishnav/devspace serve
 | --- | --- |
 | `DEVSPACE_LOG_LEVEL` | `info` |
 | `DEVSPACE_LOG_FORMAT` | `json` |
-| `DEVSPACE_LOG_REQUESTS` | `1` |
+| `DEVSPACE_LOG_REQUESTS` | `0` |
 | `DEVSPACE_LOG_ASSETS` | `0` |
-| `DEVSPACE_LOG_TOOL_CALLS` | `1` |
+| `DEVSPACE_LOG_TOOL_CALLS` | `0` |
 | `DEVSPACE_LOG_SHELL_COMMANDS` | `0` |
 | `DEVSPACE_TRUST_PROXY` | `0` |
 
